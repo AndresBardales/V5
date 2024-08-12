@@ -10,7 +10,8 @@ from xray_service import (
     getStatusXrayCloud,
     set_thread_local_account,
     get_thread_local_account,
-    get_next_client
+    get_next_client,
+    getTestCasesUpdated
 )
 from CacheIssue import CacheIssue
 from test_processor import process_testcases
@@ -176,10 +177,76 @@ def main(sortProject=[], testToProcess=[]):
             
             logger.info(f"Finalizado el reprocesamiento de tests fallidos. Total resueltos: {tests_updated_successfully}, Total no resueltos: {tests_updated_failed}")
 
+def lookUpdatedTest(filter_keys=None):
+    caches_cloud = {key: CacheIssue(f'{path}in/', f'{path}out/', key, "cloud") for key, path in cache_paths.items()}
+    caches_server = {key: CacheIssue(f'{path}in/', f'{path}out/', key, "server") for key, path in cache_paths.items()}
+
+    cache_server = caches_server["testcases"]
+    
+    if filter_keys:
+        filter_keys = filter_keys.split(',')
+    else:
+        filter_keys = None
+
+    # Obtén las keys del cache
+    cache_keys = cache_server.get_keys()
+
+    # Si filter_keys es None o una lista vacía, no aplicar filtrado
+    if filter_keys:
+        filtered_keys = [key for key in cache_keys if any(key.startswith(fk) for fk in filter_keys)]
+    else:
+        filtered_keys = cache_keys
+
+    # Abre el archivo JSON para leer los test cases ya listos
+    with open('logs/TestCaseReady.json', 'r') as file:
+        testCasesReady = json.load(file)
+    
+    # Calcula la diferencia entre las keys filtradas y las ya listas
+    difference = list(set(filtered_keys) - set(testCasesReady))
+    
+    # Lista para guardar las keys de los test cases que necesitan edición
+    test_cases_to_update = []
+
+    # Paginación - Procesar en lotes de 100
+    batch_size = 100
+    batches = [difference[i:i + batch_size] for i in range(0, len(difference), batch_size)]
+    
+    # Usar ThreadPoolExecutor para realizar consultas en paralelo
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(getTestCasesUpdated, batch): batch for batch in batches}
+        
+        for future in as_completed(futures):
+            test_cases_data = future.result()
+            
+            # Procesar cada test case en el batch
+            for testcase in test_cases_data["data"]["getTests"]["results"]:
+                key = testcase["jira"]["key"]
+                test_type = testcase["testType"]["kind"]
+                steps = testcase.get("steps", None)
+                gherkin_content = testcase.get("gherkin", None)
+                #print(f"steps: {steps}")
+                if test_type == "Steps" and steps:
+                    # Manual test case with steps, should be updated
+                    test_cases_to_update.append(key)
+                elif test_type in ["Gherkin", "Cucumber"]:
+                    if gherkin_content and gherkin_content != "{}":
+                        # Cucumber/Gherkin test case with valid content
+                        test_cases_to_update.append(key)
+    
+    # Guardar las keys en el archivo TestCasesUpdated.json
+    with open('logs/TestCasesUpdated.json', 'w') as outfile:
+        json.dump(test_cases_to_update, outfile, indent=4)
+    
+    print(f"Test cases to update: {test_cases_to_update}")
+
 if __name__ == "__main__":
+    
     print(config.sort)
     print(config.process)
+    if config.process == "ALL":
+        config.process=[]
 
+    lookUpdatedTest(config.process)
     sortProject = config.sort.split(',') if config.sort else []
     testToProcess = config.process.split(',') if config.process else []
     print(f"sortProject: {sortProject}")

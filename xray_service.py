@@ -294,3 +294,48 @@ def add_test_sets_to_test(issue_id, test_set_ids):
     except Exception as e:
         log_precondition_error(test_id, f"Error adding preconditions to test: {e}")
         raise e
+
+def getTestCasesUpdated(keys):
+    # Unir las claves en una cadena separada por comas
+    keys_str = ','.join(keys)
+    
+    query = f'''
+        {{
+        getTests(jql: "key in ({keys_str})", limit: 100) {{
+            total
+            start
+            limit
+            results {{
+                lastModified
+                issueId
+                testType {{
+                    name
+                    kind
+                }}
+                steps {{
+                    id
+                    data
+                    action
+                    result
+                }}
+                gherkin
+                unstructured
+                jira(fields: [ "key"])
+            }}
+        }}
+    }}
+    '''
+    print(query)
+    
+    # Obtener cliente, si es None, obtener el siguiente cliente disponible
+    client = get_thread_local_account()
+    if client is None:
+        client = get_next_client()
+        set_thread_local_account(client)
+    
+    try:
+        response = send_graphql_request(query, client=client)
+        return response
+    except Exception as e:
+        print(f"Error retrieving test cases: {e}")
+        raise e

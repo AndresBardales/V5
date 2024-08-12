@@ -111,31 +111,43 @@ def process_testcases(testServer, testCloud):
     try:
         with open('logs/TestCaseReady.json', 'r', encoding='utf-8') as f:
             processed_tests = json.load(f)
+        
+        with open('logs/TestCasesUpdated.json', 'r', encoding='utf-8') as f:
+            updated_tests = json.load(f)
 
         if has_been_processed(test_key, processed_tests):
             logger.info(f"Test Case {test_key} already processed.")
             print("Test Case ignorado")
             return
-
-        # Actualizar el tipo de test
-        update_test_type(issue_id, test_type)
-
-        if test_type == 'Manual':
-            # Iterar sobre los pasos del test manual y agregarlos
-            print(f"steps: {steps}")
-            for step in steps:
-                action = step.get('fields').get('Action')
-                data = step.get('fields').get('Data')
-                result = step.get('fields').get('ExpectedResult')
-                add_test_step(issue_id, action, data, result)
+        
+        # Verificar si el test case ya ha sido actualizado
+        if test_key in updated_tests:
+            logger.info(f"Test Case {test_key} already updated. Skipping type and definition update.")
+            print("Test Case ya actualizado previamente, omitiendo actualización de tipo y definición.")
         else:
-            # Actualizar la definición del test
-            if test_type == 'Cucumber':
-                update_gherkin_test_definition(issue_id, definition)
-            else:
-                update_unstructured_test_definition(issue_id, definition)
+            # Actualizar el tipo de test
+            update_test_type(issue_id, test_type)
 
-        # Vincular test sets asociados
+            if test_type == 'Manual':
+                # Iterar sobre los pasos del test manual y agregarlos
+                for step in steps:
+                    action = step.get('fields').get('Action')
+                    data = step.get('fields').get('Data')
+                    result = step.get('fields').get('ExpectedResult')
+                    add_test_step(issue_id, action, data, result)
+            else:
+                # Actualizar la definición del test
+                if test_type == 'Cucumber':
+                    update_gherkin_test_definition(issue_id, definition)
+                else:
+                    update_unstructured_test_definition(issue_id, definition)
+            
+            # Registrar que este test case ya ha sido actualizado
+            updated_tests.append(test_key)
+            with open('logs/TestCasesUpdated.json', 'w', encoding='utf-8') as f:
+                json.dump(updated_tests, f, indent=4)
+
+        # Continuar con la parte de test sets y precondiciones
         test_set_ids = get_test_set_ids(test_key)
         print(f"test_set_ids: {test_set_ids}")
         if test_set_ids:
